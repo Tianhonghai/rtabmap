@@ -73,6 +73,7 @@ VWDictionary::VWDictionary(const ParametersMap & parameters) :
 	_flannIndex(new FlannIndex()),
 	_strategy(kNNBruteForce)
 {
+	// Nearest_Neighbors最近邻 匹配算法：Brute Force暴力匹配，FLANN最近邻匹配
 	this->setNNStrategy((NNStrategy)Parameters::defaultKpNNStrategy());
 	this->parseParameters(parameters);
 }
@@ -308,18 +309,19 @@ void VWDictionary::setNNStrategy(NNStrategy strategy)
 	}
 #endif
 #endif
-
+	// kNNFlannNaive=0, kNNFlannKdTree=1, kNNFlannLSH=2, kNNBruteForce=3, kNNBruteForceGPU=4
+	// strategy 如果大于5的话将强制设为BF
 	if(strategy>=kNNUndef)
 	{
 		UERROR("Nearest neighobr strategy \"%d\" chosen but this strategy cannot be used with a dictionary! Doing \"kNNBruteForce\" instead.");
 		strategy = kNNBruteForce;
 	}
-
 	bool update = _strategy != strategy;
 	_strategy = strategy;
 	if(update)
 	{
 		_dataTree = cv::Mat();
+		//  获取map中的所有键值，Get all keys from a std::map.
 		_notIndexedWords = uKeysSet(_visualWords);
 		_removedIndexedWords.clear();
 		this->update();
@@ -405,6 +407,7 @@ cv::Mat VWDictionary::convert32FToBin(const cv::Mat & descriptorsIn)
 
 void VWDictionary::update()
 {
+	// 设置增量式词袋，param Kp/IncrementalDictionary
 	ULOGGER_DEBUG("incremental=%d", _incrementalDictionary?1:0);
 	if(!_incrementalDictionary)
 	{
@@ -419,13 +422,15 @@ void VWDictionary::update()
 			return;
 		}
 	}
-
+	// 如果visualWord为空，或者还有visualWord没有被index，进入if执行
+	UWARN("_notIndexedWords is %d, _visualWords is %d, _removedIndexedWords is %d", int(_notIndexedWords.size()), int(_visualWords.size()), int(_removedIndexedWords.size()));
 	if(_notIndexedWords.size() || _visualWords.size() == 0 || _removedIndexedWords.size())
 	{
 		if(_incrementalFlann &&
 		   _strategy < kNNBruteForce &&
 		   _visualWords.size())
 		{
+			UWARN("Got 1st if");
 			ULOGGER_DEBUG("Incremental FLANN: Removing %d words...", (int)_removedIndexedWords.size());
 			for(std::set<int>::iterator iter=_removedIndexedWords.begin(); iter!=_removedIndexedWords.end(); ++iter)
 			{
@@ -507,6 +512,7 @@ void VWDictionary::update()
 				_visualWords.size() &&
 				_dataTree.rows)
 		{
+			UWARN("Got 2nd if");
 			//just add not indexed words
 			int i = _dataTree.rows;
 			_dataTree.reserve(_dataTree.rows + _notIndexedWords.size());
@@ -525,6 +531,7 @@ void VWDictionary::update()
 		}
 		else
 		{
+			UWARN("Got 3th if");
 			_mapIndexId.clear();
 			_mapIdIndex.clear();
 			_dataTree = cv::Mat();
@@ -718,6 +725,7 @@ std::list<int> VWDictionary::addNewWords(
 		type = _visualWords.begin()->second->getDescriptor().type();
 		UASSERT(type == CV_32F || type == CV_8U);
 	}
+	// 比较输入的描述子的col与已经存在的dict中的描述子的col是否相同
 	if(dim && dim != descriptorsIn.cols)
 	{
 		UERROR("Descriptors (size=%d) are not the same size as already added words in dictionary(size=%d)", descriptorsIn.cols, dim);
@@ -858,7 +866,7 @@ std::list<int> VWDictionary::addNewWords(
 		UDEBUG("Time to find nn = %f s", timerLocal.ticks());
 	}
 
-	// Process results
+	// Process results 处理校验后和初步处理的所有的描述子，以更新dict
 	for(int i = 0; i < descriptors.rows; ++i)
 	{
 		std::multimap<float, int> fullResults; // Contains results from the kd-tree search and the naive search in new words

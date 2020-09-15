@@ -506,6 +506,7 @@ Feature2D * Feature2D::create(const ParametersMap & parameters)
 	Parameters::parse(parameters, Parameters::kKpDetectorStrategy(), type);
 	return create((Feature2D::Type)type, parameters);
 }
+// 这里根据param中的kp/DetectorStrategy确定特征的类型
 Feature2D * Feature2D::create(Feature2D::Type type, const ParametersMap & parameters)
 {
 

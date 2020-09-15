@@ -290,6 +290,7 @@ void Rtabmap::init(const ParametersMap & parameters, const std::string & databas
 {
 	UDEBUG("path=%s", databasePath.c_str());
 	ParametersMap::const_iterator iter;
+	// 这里的WorkingDir是获取parameters中的设定值，默认为空，而Rtabmap_ros中的workingDir是在代码中进行了初始化，设定为~/.ros/, 地图db的路径
 	if((iter=parameters.find(Parameters::kRtabmapWorkingDirectory())) != parameters.end())
 	{
 		this->setWorkingDirectory(iter->second.c_str());
@@ -947,6 +948,7 @@ bool Rtabmap::process(
 		int id,
 		const std::map<std::string, float> & externalStats)
 {
+	// 调用第一个重载
 	return this->process(SensorData(image, id), Transform());
 }
 bool Rtabmap::process(
@@ -969,16 +971,19 @@ bool Rtabmap::process(
 	covariance.at<double>(3,3) = odomAngularVariance;
 	covariance.at<double>(4,4) = odomAngularVariance;
 	covariance.at<double>(5,5) = odomAngularVariance;
+	// 调用第一个重载
 	return process(data, odomPose, covariance, odomVelocity, externalStats);
 }
+// 最后都要进入到这个执行函数中
 bool Rtabmap::process(
 		const SensorData & data,
-		Transform odomPose,
+		Transform odomPose,// 最新的位姿
 		const cv::Mat & odomCovariance,
-		const std::vector<float> & odomVelocity,
+		const std::vector<float> & odomVelocity,// 需要订阅odomInfo的话题才有数据，否则为空
 		const std::map<std::string, float> & externalStats)
 {
 	UDEBUG("");
+	// UWARN("size of odomVel is %d", odomVelocity.size());
 
 	//============================================================
 	// Initialization
@@ -1051,6 +1056,9 @@ bool Rtabmap::process(
 	// If RGBD SLAM is enabled, a pose must be set.
 	//============================================================
 	bool fakeOdom = false;
+	// printf("RGBDSlamMode is %d", _rgbdSlamMode);
+	// 对应的param: RGBD/Enabled
+	UWARN("vwd size at begining of process() is %d", _memory->getVWDictionary()->getVisualWords().size());
 	if(_rgbdSlamMode)
 	{
 		if(!_memory->isIncremental() && !odomPose.isNull())
@@ -1063,6 +1071,8 @@ bool Rtabmap::process(
 			else if(_optimizedPoses.size() && _mapCorrection.isIdentity() && !_lastLocalizationPose.isNull() && _lastLocalizationNodeId == 0)
 			{
 				// Localization mode
+				// 从newest:true或者oldest:false node开始优化Graph??
+				// param: RGBD/OptimizeFromGraphEnd
 				if(!_optimizeFromGraphEnd)
 				{
 					//set map->odom so that odom is moved back to last saved localization
@@ -1105,14 +1115,17 @@ bool Rtabmap::process(
 				odomPose = _mapCorrection.inverse() * _lastLocalizationPose;
 			}
 		}
+		// 如果有里程计信息(话题或者tf),而且是建图模式
 		else if(_memory->isIncremental()) // only in mapping mode
 		{
 			// Detect if the odometry is reset. If yes, trigger a new map.
 			if(_memory->getLastWorkingSignature())
 			{
+				// 在上次有效的signature中提取位姿
 				const Transform & lastPose = _memory->getLastWorkingSignature()->getPose(); // use raw odometry
 
 				// look for identity
+				// 如果新的odom信息是零点，重新开始一个map
 				if(!lastPose.isIdentity() && odomPose.isIdentity())
 				{
 					int mapId = triggerNewMap();
@@ -1121,6 +1134,7 @@ bool Rtabmap::process(
 				else if(_newMapOdomChangeDistance > 0.0)
 				{
 					// look for large change
+					// lastPose 从上次的Signature中提取的位姿； odomPose 当前获取的最新位姿
 					Transform lastPoseToNewPose = lastPose.inverse() * odomPose;
 					float x,y,z, roll,pitch,yaw;
 					lastPoseToNewPose.getTranslationAndEulerAngles(x,y,z, roll,pitch,yaw);
@@ -1144,6 +1158,7 @@ bool Rtabmap::process(
 	ULOGGER_INFO("Updating memory...");
 	if(_rgbdSlamMode)
 	{
+		// _memory->update() 重要的入口函数，生成signature，包含关键点、描述子等
 		if(!_memory->update(data, odomPose, odomCovariance, odomVelocity, &statistics_))
 		{
 			return false;
@@ -1169,7 +1184,7 @@ bool Rtabmap::process(
 	ULOGGER_INFO("timeMemoryUpdate=%fs", timeMemoryUpdate);
 
 	//============================================================
-	// Metric
+	// Metric 公制 测量？？判断当前的运动状态？？判断位移是否太小，速度是否太大？？
 	//============================================================
 	bool smallDisplacement = false;
 	bool tooFastMovement = false;
@@ -1260,6 +1275,7 @@ bool Rtabmap::process(
 					//============================================================
 					UINFO("Odometry refining: guess = %s", guess.prettyPrint().c_str());
 					RegistrationInfo info;
+					// icp计算transform的入口
 					Transform t = _memory->computeTransform(oldId, signature->id(), guess, &info);
 					if(!t.isNull())
 					{
@@ -3262,11 +3278,15 @@ bool Rtabmap::process(
 	}
 	if(!_rawDataKept)
 	{
+		UWARN("vwd size before removeRawData() is %d", _memory->getVWDictionary()->getVisualWords().size());
 		_memory->removeRawData(signature->id(), true, !_neighborLinkRefining && !_proximityBySpace, true);
+		UWARN("vwd size after removeRawData() is %d", _memory->getVWDictionary()->getVisualWords().size());
 	}
 
 	// remove last signature if the memory is not incremental or is a bad signature (if bad signatures are ignored)
 	int signatureRemoved = _memory->cleanup();
+	UWARN("vwd size after cleanup() is %d", _memory->getVWDictionary()->getVisualWords().size());
+
 	if(signatureRemoved)
 	{
 		signaturesRemoved.push_back(signatureRemoved);
@@ -3288,6 +3308,7 @@ bool Rtabmap::process(
 					signature->id());
 			signaturesRemoved.push_back(signature->id());
 			_memory->deleteLocation(signature->id());
+			UWARN("vwd size at 3310 process() is %d", _memory->getVWDictionary()->getVisualWords().size());
 		}
 		else if(_startNewMapOnGoodSignature &&
 				(signature->getLandmarks().empty() && signature->isBadSignature()) &&
@@ -3297,15 +3318,23 @@ bool Rtabmap::process(
 					signature->id());
 			signaturesRemoved.push_back(signature->id());
 			_memory->deleteLocation(signature->id());
+			UWARN("vwd size at 3320 process() is %d", _memory->getVWDictionary()->getVisualWords().size());
 		}
 		else if((smallDisplacement || tooFastMovement) && _loopClosureHypothesis.first == 0 && lastProximitySpaceClosureId == 0)
 		{
+			UWARN("%d, %d, %d, %d", smallDisplacement, tooFastMovement, _loopClosureHypothesis.first, lastProximitySpaceClosureId);
 			// Don't delete the location if a loop closure is detected
 			UINFO("Ignoring location %d because the displacement is too small! (d=%f a=%f)",
 				  signature->id(), _rgbdLinearUpdate, _rgbdAngularUpdate);
 			// If there is a too small displacement, remove the node
 			signaturesRemoved.push_back(signature->id());
 			_memory->deleteLocation(signature->id());
+			UWARN("vwd size at 3330 process() is %d", _memory->getVWDictionary()->getVisualWords().size());
+			UWARN("Total signature size at 3333 process() is %d",_memory->getAllSignatureIds().size());
+			for(auto s : _memory->getAllSignatureIds())
+			{
+				UWARN("%d", s);
+			}
 		}
 		else
 		{
@@ -3694,7 +3723,7 @@ bool Rtabmap::process(
 	{
 		statistics_.addStatistic(Statistics::kTimingFinalizing_statistics(), timeFinalizingStatistics*1000);
 	}
-
+	UWARN("vwd size at end of process() is %d", _memory->getVWDictionary()->getVisualWords().size());
 	return true;
 }
 

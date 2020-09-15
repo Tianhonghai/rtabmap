@@ -332,6 +332,7 @@ void computeVarianceAndCorrespondences(
 }
 
 // return transform from source to target (All points must be finite!!!)
+// 普通的point-to-point配准
 Transform icp(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr & cloud_source,
 			  const pcl::PointCloud<pcl::PointXYZ>::ConstPtr & cloud_target,
 			  double maxCorrespondenceDistance,
@@ -370,6 +371,7 @@ Transform icp(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr & cloud_source,
 }
 
 // return transform from source to target (All points/normals must be finite!!!)
+// point-to-plane配准
 Transform icpPointToPlane(
 		const pcl::PointCloud<pcl::PointNormal>::ConstPtr & cloud_source,
 		const pcl::PointCloud<pcl::PointNormal>::ConstPtr & cloud_target,

@@ -292,7 +292,7 @@ private:
 	BayesFilter * _bayesFilter;
 	Optimizer * _graphOptimizer;
 	ParametersMap _parameters;
-
+	//主要的计算单元
 	Memory * _memory;
 
 	FILE* _foutFloat;

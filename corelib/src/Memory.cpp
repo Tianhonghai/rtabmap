@@ -126,6 +126,7 @@ Memory::Memory(const ParametersMap & parameters) :
 	_tfIdfLikelihoodUsed(Parameters::defaultKpTfIdfLikelihoodUsed()),
 	_parallelized(Parameters::defaultKpParallelized())
 {
+	// 根据param: kp/DetectorStrategy 确定特征类型
 	_feature2D = Feature2D::create(parameters);
 	_vwd = new VWDictionary(parameters);
 	_registrationPipeline = Registration::create(parameters);
@@ -745,10 +746,12 @@ void Memory::parseParameters(const ParametersMap & parameters)
 void Memory::preUpdate()
 {
 	_signaturesAdded = 0;
+	//vwd VisualWord 
 	if(_vwd->isIncremental())
 	{
 		this->cleanUnusedWords();
 	}
+	// vis words dictionary 和 signature 是否同时生成
 	if(_vwd && !_parallelized)
 	{
 		//When parallelized, it is done in CreateSignature
@@ -780,7 +783,10 @@ bool Memory::update(
 	// Pre update...
 	//============================================================
 	UDEBUG("pre-updating...");
+	// 清除vwd中的没有用到的words？？
+	UWARN("vwd size before preupdate() is %d", _vwd->getVisualWords().size());
 	this->preUpdate();
+	UWARN("vwd size after preupdate() is %d", _vwd->getVisualWords().size());
 	t=timer.ticks()*1000;
 	if(stats) stats->addStatistic(Statistics::kTimingMemPre_update(), t);
 	UDEBUG("time preUpdate=%f ms", t);
@@ -802,11 +808,13 @@ bool Memory::update(
 	t=timer.ticks()*1000;
 	if(stats) stats->addStatistic(Statistics::kTimingMemSignature_creation(), t);
 	UDEBUG("time creating signature=%f ms", t);
-
+	UWARN("Words in signature are %d", signature->getWords().size());
+	UWARN("WordsDescriptors in signature are %d", signature->getWordsDescriptors().size());
 	// It will be added to the short-term memory, no need to delete it...
 	this->addSignatureToStm(signature, covariance);
 
 	_lastSignature = signature;
+	UWARN("Total signatures size is %d", this->getSignatures().size());
 
 	//============================================================
 	// Rehearsal step...
@@ -835,6 +843,7 @@ bool Memory::update(
 				  "including the new one added).", (int)_stMem.size());
 		}
 	}
+	UWARN("Total signatures size after rehearsal is %d", this->getSignatures().size());
 
 	//============================================================
 	// Transfer the oldest signature of the short-term memory to the working memory
@@ -876,6 +885,8 @@ bool Memory::update(
 	}
 
 	UDEBUG("totalTimer = %fs", totalTimer.ticks());
+	UWARN("vwd size at end of update() is %d", _vwd->getVisualWords().size());
+	UWARN("Total signatures size at end of update() is %d", this->getSignatures().size());
 
 	return true;
 }
@@ -999,8 +1010,9 @@ void Memory::addSignatureToStm(Signature * signature, const cv::Mat & covariance
 				_labels.insert(std::make_pair(signature->id(), tag));
 			}
 		}
-
+		UWARN("signatures size before insert is %d", _signatures.size());
 		_signatures.insert(_signatures.end(), std::pair<int, Signature *>(signature->id(), signature));
+		UWARN("signatures size after insert is %d", _signatures.size());
 		_stMem.insert(_stMem.end(), signature->id());
 		if(!signature->getGroundTruthPose().isNull()) {
 			_groundTruths.insert(std::make_pair(signature->id(), signature->getGroundTruthPose()));
@@ -2845,7 +2857,7 @@ Transform Memory::computeTransform(
 			tmpFrom2.setWords3(words3DMap);
 			tmpFrom2.setWords(wordsMap);
 			tmpFrom2.setWordsDescriptors(wordsDescriptorsMap);
-
+			// 配准
 			transform = _registrationPipeline->computeTransformationMod(tmpFrom2, tmpTo, guess, info);
 
 			if(!transform.isNull() && info)
@@ -3995,6 +4007,14 @@ private:
 	VWDictionary * _vwp;
 };
 
+/**
+ * @brief 根据图像计算Signature，很长。。。4000-5231
+ * 
+ * @param inputData 
+ * @param pose 
+ * @param stats 
+ * @return Signature* 
+ */
 Signature * Memory::createSignature(const SensorData & inputData, const Transform & pose, Statistics * stats)
 {
 	UDEBUG("");
@@ -4032,6 +4052,7 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 	}
 	UASSERT(_feature2D != 0);
 
+	// 用一个类vwd的实例作为参数，实例化一个线程
 	PreUpdateThread preUpdateThread(_vwd);
 
 	UTimer timer;
@@ -4039,10 +4060,15 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 	float t;
 	std::vector<cv::KeyPoint> keypoints;
 	cv::Mat descriptors;
+	// printf("ImageRaw is empty? %s \n", data.imageRaw().empty() ? "True" : "False");
+	// printf("Key points is empty? %s \n", data.keypoints().empty() ? "True" : "False");
 	bool isIntermediateNode = data.id() < 0 || (data.imageRaw().empty() && data.keypoints().empty());
+	// printf("Is intermediateNode? %d \n", isIntermediateNode);
 	int id = data.id();
+	// 对data的id做校验
 	if(_generateIds)
 	{
+		// ++idCount, signature的id依次递增，并作为location的id,但并非表示signature的索引？？
 		id = this->getNextId();
 	}
 	else
@@ -4070,11 +4096,12 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 			return 0;
 		}
 	}
-
+	// params: Rtabmap/ImagesAlreadyRectified, 图像是否经过了对齐、滤波等？？
 	bool imagesRectified = _imagesAlreadyRectified;
 	// Stereo must be always rectified because of the stereo correspondence approach
 	if(!imagesRectified && !data.imageRaw().empty() && !(_rectifyOnlyFeatures && data.rightRaw().empty()))
 	{
+		// printf("We test here"); 未执行，上面的条件语句为false
 		// we assume that once rtabmap is receiving data, the calibration won't change over time
 		if(data.cameraModels().size())
 		{
@@ -4150,19 +4177,41 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 		UDEBUG("time rectification = %fs", t);
 	}
 
+	// printf("Working mem size is %d, Short mem size is %d \n", _workingMem.size(), _stMem.size());
+	/***** 这是一段日志
+	Working mem size is 1, Short mem size is 28 
+	[ INFO] [1598943847.382470984]: rtabmap (65): Rate=1.00s, Limit=0.000s, RTAB-Map=0.0508s, Maps update=0.0001s pub=0.0000s (local map=29, WM=29)
+	Working mem size is 1, Short mem size is 29 
+	[ INFO] [1598943848.441218147]: rtabmap (66): Rate=1.00s, Limit=0.000s, RTAB-Map=0.0498s, Maps update=0.0001s pub=0.0000s (local map=30, WM=30)
+	Working mem size is 1, Short mem size is 30 
+	[ INFO] [1598943850.426411720]: rtabmap (67): Rate=1.00s, Limit=0.000s, RTAB-Map=0.0539s, Maps update=0.0001s pub=0.0000s (local map=31, WM=31)
+	...
+	Working mem size is 37, Short mem size is 30 
+	[ INFO] [1598943925.950151166]: rtabmap (103): Rate=1.00s, Limit=0.000s, RTAB-Map=0.0989s, Maps update=0.0001s pub=0.0000s (local map=67, WM=67)
+	Working mem size is 38, Short mem size is 30 
+	[ INFO] [1598943927.744892340]: rtabmap (104): Rate=1.00s, Limit=0.000s, RTAB-Map=0.0875s, Maps update=0.0001s pub=0.0000s (local map=68, WM=68)
+	*****/
+	UWARN("Working mem size is %d, Short mem size is %d", _workingMem.size(), _stMem.size());
+	UWARN("Total active refs are %d", _vwd->getTotalActiveReferences());
 	int treeSize= int(_workingMem.size() + _stMem.size());
+	// 特征点最大数量，param/MaxFeatures, 默认500
+	// printf("Feature strategy is %d \n", _feature2D->getType());
+	// printf("Max features is %d \n", _feature2D->getMaxFeatures()); 
+	// params: Kp/MaxFeatures = 500
 	int meanWordsPerLocation = _feature2D->getMaxFeatures()>0?_feature2D->getMaxFeatures():0;
 	if(treeSize > 1)
 	{
+		// 获取image中的激活的words数量？？这里的Active ref是vwd中的所有ref，添加words或者ref的条件：描述子数量大于设定的MaxFeature？？
 		meanWordsPerLocation = _vwd->getTotalActiveReferences() / (treeSize-1); // ignore virtual signature
 	}
+	UWARN("Mean WordPerLocation is %d", meanWordsPerLocation);
 
 	if(_parallelized && !isIntermediateNode)
 	{
 		UDEBUG("Start dictionary update thread");
 		preUpdateThread.start();
 	}
-
+	UWARN("vwd size after thread started is %d", _vwd->getVisualWords().size());
 	int preDecimation = 1;
 	std::vector<cv::Point3f> keypoints3D;
 	SensorData decimatedData;
@@ -4250,30 +4299,41 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 			if(_rawDescriptorsKept&&!pose.isNull()&&_feature2D->getMaxFeatures()>0&&_feature2D->getMaxFeatures()<_visMaxFeatures)
 			{
 				// The total extracted features should match the number of features used for transformation estimation
+				// 将 _feature2D 的 MaxFeatures 临时提到 visMaxFeature
 				UDEBUG("Changing temporary max features from %d to %d", _feature2D->getMaxFeatures(), _visMaxFeatures);
 				tmpMaxFeatureParameter.insert(ParametersPair(Parameters::kKpMaxFeatures(), uNumber2Str(_visMaxFeatures)));
 				_feature2D->parseParameters(tmpMaxFeatureParameter);
 			}
 
+			// 检测关键点的入口，计算关键点和添加word所采用的MaxFeature参数不同？？
+			// printf("Max features before generate kp is %d \n", _feature2D->getMaxFeatures());
 			keypoints = _feature2D->generateKeypoints(
 					imageMono,
 					depthMask);
-
+			// 重新将_feature2D的MaxFeatures设置为param的数值
 			if(tmpMaxFeatureParameter.size())
 			{
 				tmpMaxFeatureParameter.at(Parameters::kKpMaxFeatures()) = uNumber2Str(oldMaxFeatures);
 				_feature2D->parseParameters(tmpMaxFeatureParameter); // reset back
 			}
+			// printf("Max features after generate kp is %d \n", _feature2D->getMaxFeatures());
 			t = timer.ticks();
 			if(stats) stats->addStatistic(Statistics::kTimingMemKeypoints_detection(), t*1000.0f);
+			// 完成了一次keypoints的检测，输出日志
+			// printf("time keypoints (%d) = %fs\n", (int)keypoints.size(), t);
 			UDEBUG("time keypoints (%d) = %fs", (int)keypoints.size(), t);
+			UWARN("keypoints = %d", (int)keypoints.size());
 
+			// 生成描述子，根据关键点计算描述子
 			descriptors = _feature2D->generateDescriptors(imageMono, keypoints);
 			t = timer.ticks();
 			if(stats) stats->addStatistic(Statistics::kTimingMemDescriptors_extraction(), t*1000.0f);
 			UDEBUG("time descriptors (%d) = %fs", descriptors.rows, t);
+			UWARN("descriptors = %d", descriptors.rows);
 
 			UDEBUG("ratio=%f, meanWordsPerLocation=%d", _badSignRatio, meanWordsPerLocation);
+			// 比较描述子和每个location的word数量的均值？？
+			// (less than Ratio x AverageWordsPerImage = bad)
 			if(descriptors.rows && descriptors.rows < _badSignRatio * float(meanWordsPerLocation))
 			{
 				descriptors = cv::Mat();
@@ -4485,12 +4545,14 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 		}
 	}
 
+	// 等待线程结束？？
 	if(_parallelized)
 	{
 		UDEBUG("Joining dictionary update thread...");
 		preUpdateThread.join(); // Wait the dictionary to be updated
 		UDEBUG("Joining dictionary update thread... thread finished!");
 	}
+	// UWARN("vwd size after thread joined is %d", _vwd->getVisualWords().size());
 
 	t = timer.ticks();
 	if(stats) stats->addStatistic(Statistics::kTimingMemJoining_dictionary_update(), t*1000.0f);
@@ -4511,6 +4573,8 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 		std::vector<bool> inliers;
 		cv::Mat descriptorsForQuantization = descriptors;
 		std::vector<int> quantizedToRawIndices;
+		// params:Kp/MaxFeatures， 描述子数量大于设定的maxFeature时，才会有Quantization的过程，才会执行addNewWords()
+		// 量化主要是limitKeypoints()， 即根据keypoint中的response属性进行排序删减
 		if(_feature2D->getMaxFeatures()>0 && descriptors.rows > _feature2D->getMaxFeatures())
 		{
 			UASSERT((int)keypoints.size() == descriptors.rows);
@@ -4559,7 +4623,10 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 		}
 
 		// Quantization to vocabulary
+		UWARN("vwd size before addNewWords() is %d", _vwd->getVisualWords().size());
+		// 将生成的描述子添加到vwd中（但还需要进行某些筛选过滤）
 		wordIds = _vwd->addNewWords(descriptorsForQuantization, id);
+		UWARN("vwd size after addNewWords() is %d", _vwd->getVisualWords().size());
 
 		// Set ID -1 to features not used for quantization
 		if(wordIds.size() < keypoints.size())
@@ -4586,6 +4653,7 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 		t = timer.ticks();
 		if(stats) stats->addStatistic(Statistics::kTimingMemAdd_new_words(), t*1000.0f);
 		UDEBUG("time addNewWords %fs indexed=%d not=%d", t, _vwd->getIndexedWordsCount(), _vwd->getNotIndexedWordsCount());
+		UWARN("time addNewWords %fs indexed=%d not=%d", t, _vwd->getIndexedWordsCount(), _vwd->getNotIndexedWordsCount());
 	}
 	else if(id>0)
 	{
@@ -4686,7 +4754,7 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 	std::vector<CameraModel> cameraModels = data.cameraModels();
 	StereoCameraModel stereoCameraModel = data.stereoCameraModel();
 
-	// apply decimation?
+	// apply decimation? 削减？？
 	if(_imagePostDecimation > 1 && !isIntermediateNode)
 	{
 		if(_imagePostDecimation == preDecimation && decimatedData.isValid())
@@ -4867,7 +4935,7 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 		if(stats) stats->addStatistic(Statistics::kTimingMemScan_filtering(), t*1000.0f);
 		UDEBUG("time normals scan = %fs", t);
 	}
-
+	// 这里根据上面generate的words生成signature
 	Signature * s;
 	if(this->isBinDataKept() && (!isIntermediateNode || _saveIntermediateNodeData))
 	{
@@ -5216,7 +5284,6 @@ Signature * Memory::createSignature(const SensorData & inputData, const Transfor
 			UERROR("Invalid landmark received! IDs should be > 0 (it is %d). Ignoring this landmark.", iter->second.id());
 		}
 	}
-
 	return s;
 }
 

@@ -557,7 +557,7 @@ Transform RegistrationIcp::computeTransformationImpl(
 	UTimer timer;
 	std::string msg;
 	Transform transform;
-
+	// formSignature是Signature类型，有sensorData的成员变量
 	SensorData & dataFrom = fromSignature.sensorData();
 	SensorData & dataTo = toSignature.sensorData();
 
@@ -583,6 +583,7 @@ Transform RegistrationIcp::computeTransformationImpl(
 
 		if(fromScan.size() && toScan.size())
 		{
+			//Icp算出来的原始transform
 			Transform icpT;
 			bool hasConverged = false;
 			float correspondencesRatio = 0.0f;
@@ -632,6 +633,7 @@ Transform RegistrationIcp::computeTransformationImpl(
 				}
 				else
 				{
+					// fromCloudNormals由fromScan转格式
 					pcl::PointCloud<pcl::PointNormal>::Ptr fromCloudNormals = util3d::laserScanToPointCloudNormal(fromScan, fromScan.localTransform());
 					pcl::PointCloud<pcl::PointNormal>::Ptr toCloudNormals = util3d::laserScanToPointCloudNormal(toScan, guess * toScan.localTransform());
 
@@ -692,6 +694,7 @@ Transform RegistrationIcp::computeTransformationImpl(
 					else
 #endif
 					{
+						// fromCloudNormals, toCloudNormals是点云，2D？3D？
 						icpT = util3d::icpPointToPlane(
 								fromCloudNormals,
 								toCloudNormals,

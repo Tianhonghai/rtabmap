@@ -354,6 +354,7 @@ private:
 	bool _tfIdfLikelihoodUsed;
 	bool _parallelized;
 
+	//配准的实例
 	Registration * _registrationPipeline;
 	RegistrationIcp * _registrationIcpMulti;
 
